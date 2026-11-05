@@ -69,6 +69,65 @@ else
 fi
 
 
+head_ "2b. WireGuard: режим --lan-only (сервер в РФ, доступ к своим сетям)"
+WL_OUT="$TMP/wg-lan"
+if bash "$ROOT/wireguard/install-wireguard.sh" --dry-run --lan-only --lan 192.168.1.0/24 \
+     --clients 1 --out "$WL_OUT" --endpoint 203.0.113.10:51820 >"$TMP/wg-lan.log" 2>&1; then
+  ok "install-wireguard.sh --dry-run --lan-only"
+  allowed="$(grep '^AllowedIPs' "$WL_OUT/client1.conf" | head -1)"
+  [[ "$allowed" == "AllowedIPs = 10.66.66.0/24, 192.168.1.0/24" ]] \
+    && ok "клиент: AllowedIPs ограничен туннелем и LAN" || bad "клиент: $allowed"
+  grep -q '^DNS = ' "$WL_OUT/client1.conf" \
+    && bad "--lan-only не должен навязывать внешний DNS" || ok "DNS не навязан"
+  if grep -q 'POSTROUTING -s 10.66.66.0/24 -o .* -j MASQUERADE' "$WL_OUT/server/wg0.conf"; then
+    bad "в --lan-only не должно быть NAT в интернет"
+  else
+    ok "нет NAT в интернет"
+  fi
+  grep -q -- '-d 192.168.1.0/24 -o' "$WL_OUT/server/wg0.conf" \
+    && ok "NAT только в сторону LAN" || bad "нет NAT в сторону LAN"
+else
+  bad "install-wireguard.sh --lan-only упал:"
+  sed 's/^/       /' "$TMP/wg-lan.log" | tail -15
+fi
+
+head_ "2c. WireGuard: add-client.sh учитывает режим сервера"
+AC="$TMP/ac"
+mkdir -p "$AC/stub" "$AC/c-full" "$AC/c-lan"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'case "$1" in' \
+  '  genkey|genpsk|pubkey) openssl rand -base64 32 ;;' \
+  '  show) exit 1 ;;' \
+  '  *) exit 1 ;;' \
+  'esac' >"$AC/stub/wg"
+chmod +x "$AC/stub/wg"
+cp "$WG_OUT/server/wg0.conf" "$AC/full.conf"
+bash "$ROOT/wireguard/install-wireguard.sh" --dry-run --lan-only --lan 192.168.1.0/24 \
+  --clients 1 --out "$AC/lansrv" --endpoint 203.0.113.10:51820 >/dev/null 2>&1 || true
+cp "$AC/lansrv/server/wg0.conf" "$AC/lan.conf" 2>/dev/null || true
+
+ac_run() { PATH="$AC/stub:$PATH" WG_CONF="$1" OUT_DIR="$2" \
+           bash "$ROOT/wireguard/add-client.sh" "$3" >/dev/null 2>&1; }
+
+if ac_run "$AC/full.conf" "$AC/c-full" laptop && [[ -f "$AC/c-full/laptop.conf" ]]; then
+  grep -q '^AllowedIPs = 0.0.0.0/0, ::/0$' "$AC/c-full/laptop.conf" \
+    && grep -q '^DNS = ' "$AC/c-full/laptop.conf" \
+    && ok "full-режим: полный туннель + DNS" || bad "full-режим: неверный клиентский конфиг"
+else
+  bad "add-client.sh не отработал в full-режиме"
+fi
+
+if ac_run "$AC/lan.conf" "$AC/c-lan" phone && [[ -f "$AC/c-lan/phone.conf" ]]; then
+  if grep -q '^AllowedIPs = 10.66.66.0/24, 192.168.1.0/24$' "$AC/c-lan/phone.conf" \
+     && ! grep -q '^DNS = ' "$AC/c-lan/phone.conf"; then
+    ok "lan-only: только туннель и LAN, DNS не навязан"
+  else
+    bad "lan-only: неверный клиентский конфиг: $(grep -E '^(DNS|AllowedIPs)' "$AC/c-lan/phone.conf" | tr '\n' ' ')"
+  fi
+else
+  bad "add-client.sh не отработал в режиме --lan-only"
+fi
+
 head_ "3. AmneziaWG: dry-run"
 AWG_OUT="$TMP/awg"
 if bash "$ROOT/amneziawg/install-amneziawg.sh" --dry-run --clients 1 \

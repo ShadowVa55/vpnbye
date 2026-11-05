@@ -27,6 +27,9 @@ OUT_DIR="${OUT_DIR:-$HOME/wg-clients}"
 DRY_RUN=0
 FORCE=0
 USE_IPV6=0
+LAN_ONLY=0                           # 1 — не пускать интернет через VPN (доступ только к своим сетям)
+LAN_SUBNET=""                        # например 192.168.1.0/24 — сеть за сервером
+DNS_SET=0                            # пользователь явно указал --dns
 
 log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
@@ -44,6 +47,11 @@ usage() {
   --endpoint H:P   публичный адрес сервера (по умолчанию определяется автоматически)
   --out DIR        куда писать клиентские конфиги (по умолчанию ~/wg-clients)
   --ipv6           включить двойной стек IPv4+IPv6 в туннеле
+  --lan-only       НЕ выводить интернет через VPN: клиенты видят только туннель
+                   (и --lan, если указан). Нужно для доступа к домашней/офисной сети,
+                   когда сервер находится в России и обход блокировок не нужен.
+  --lan CIDR       дополнительно открыть клиентам локальную сеть за сервером,
+                   например --lan 192.168.1.0/24
   --dry-run        сгенерировать конфиги в --out, не трогая систему
   --force          перезаписать существующий /etc/wireguard/wg0.conf
   -h, --help       эта справка
@@ -56,10 +64,12 @@ while [[ $# -gt 0 ]]; do
     --port)     WG_PORT="${2:?}"; shift 2 ;;
     --subnet)   WG_SUBNET="${2:?}"; shift 2 ;;
     --mtu)      WG_MTU="${2:?}"; shift 2 ;;
-    --dns)      DNS_SERVERS="${2:?}"; shift 2 ;;
+    --dns)      DNS_SERVERS="${2:?}"; DNS_SET=1; shift 2 ;;
     --endpoint) ENDPOINT="${2:?}"; shift 2 ;;
     --out)      OUT_DIR="${2:?}"; shift 2 ;;
     --ipv6)     USE_IPV6=1; shift ;;
+    --lan-only) LAN_ONLY=1; shift ;;
+    --lan)      LAN_SUBNET="${2:?}"; LAN_ONLY=1; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
     --force)    FORCE=1; shift ;;
     -h|--help)  usage; exit 0 ;;
@@ -204,14 +214,28 @@ fi
   echo "MTU = $WG_MTU"
   echo "SaveConfig = false"
   echo "PostUp = iptables -I INPUT -p udp --dport $WG_PORT -j ACCEPT"
-  echo "PostUp = iptables -t nat -A POSTROUTING -s $WG_SUBNET.0/24 -o $WAN_IF -j MASQUERADE"
   echo "PostDown = iptables -D INPUT -p udp --dport $WG_PORT -j ACCEPT"
-  echo "PostDown = iptables -t nat -D POSTROUTING -s $WG_SUBNET.0/24 -o $WAN_IF -j MASQUERADE"
+  if (( LAN_ONLY == 1 )); then
+    # Режим «только свои сети»: интернет через VPN не идёт, NAT в мир не нужен
+    echo "PostUp = iptables -A FORWARD -i $WG_IFACE -j ACCEPT"
+    echo "PostUp = iptables -A FORWARD -o $WG_IFACE -j ACCEPT"
+    echo "PostDown = iptables -D FORWARD -i $WG_IFACE -j ACCEPT"
+    echo "PostDown = iptables -D FORWARD -o $WG_IFACE -j ACCEPT"
+    if [[ -n "$LAN_SUBNET" ]]; then
+      echo "PostUp = iptables -t nat -A POSTROUTING -s $WG_SUBNET.0/24 -d $LAN_SUBNET -o $WAN_IF -j MASQUERADE"
+      echo "PostDown = iptables -t nat -D POSTROUTING -s $WG_SUBNET.0/24 -d $LAN_SUBNET -o $WAN_IF -j MASQUERADE"
+    fi
+  else
+    echo "PostUp = iptables -t nat -A POSTROUTING -s $WG_SUBNET.0/24 -o $WAN_IF -j MASQUERADE"
+    echo "PostDown = iptables -t nat -D POSTROUTING -s $WG_SUBNET.0/24 -o $WAN_IF -j MASQUERADE"
+  fi
   if (( USE_IPV6 == 1 )); then
     echo "PostUp = ip6tables -I INPUT -p udp --dport $WG_PORT -j ACCEPT"
-    echo "PostUp = ip6tables -t nat -A POSTROUTING -s fd42:42:42::/64 -o $WAN_IF -j MASQUERADE"
     echo "PostDown = ip6tables -D INPUT -p udp --dport $WG_PORT -j ACCEPT"
-    echo "PostDown = ip6tables -t nat -D POSTROUTING -s fd42:42:42::/64 -o $WAN_IF -j MASQUERADE"
+    if (( LAN_ONLY == 0 )); then
+      echo "PostUp = ip6tables -t nat -A POSTROUTING -s fd42:42:42::/64 -o $WAN_IF -j MASQUERADE"
+      echo "PostDown = ip6tables -t nat -D POSTROUTING -s fd42:42:42::/64 -o $WAN_IF -j MASQUERADE"
+    fi
   fi
   echo
 } >"$SERVER_CONF"
@@ -220,6 +244,16 @@ chmod 600 "$SERVER_CONF"
 log "Серверный конфиг: $SERVER_CONF"
 
 # --- клиенты ---
+# что клиенты заворачивают в туннель
+if (( LAN_ONLY == 1 )); then
+  CLIENT_ALLOWED="$WG_SUBNET.0/24"
+  if [[ -n "$LAN_SUBNET" ]]; then
+    CLIENT_ALLOWED="$CLIENT_ALLOWED, $LAN_SUBNET"
+  fi
+else
+  CLIENT_ALLOWED="0.0.0.0/0, ::/0"
+fi
+
 declare -a CLIENT_CONFS=()
 for i in $(seq 1 "$CLIENTS"); do
   name="client$i"
@@ -238,14 +272,17 @@ for i in $(seq 1 "$CLIENTS"); do
     echo "[Interface]"
     echo "PrivateKey = $c_priv"
     echo "Address = $c_addrs"
-    echo "DNS = $DNS_SERVERS"
+    # в режиме --lan-only навязывать внешний DNS бессмысленно: в туннель идёт только LAN
+    if (( LAN_ONLY == 0 || DNS_SET == 1 )); then
+      echo "DNS = $DNS_SERVERS"
+    fi
     echo "MTU = $WG_MTU"
     echo
     echo "[Peer]"
     echo "PublicKey = $SERVER_PUB"
     echo "PresharedKey = $c_psk"
     echo "Endpoint = $ENDPOINT_ADDR"
-    echo "AllowedIPs = 0.0.0.0/0, ::/0"
+    echo "AllowedIPs = $CLIENT_ALLOWED"
     echo "PersistentKeepalive = 25"
   } >"$cfile"
   chmod 600 "$cfile"
@@ -286,6 +323,15 @@ sleep 1
 systemctl is-active --quiet "wg-quick@$WG_IFACE" || die "Сервис wg-quick@$WG_IFACE не поднялся: journalctl -u wg-quick@$WG_IFACE -n 50"
 
 log "Готово! Порт UDP/$WG_PORT, endpoint $ENDPOINT_ADDR"
+if (( LAN_ONLY == 1 )); then
+  echo
+  echo "Режим --lan-only: интернет через VPN НЕ идёт (нет NAT в мир)."
+  if [[ -n "$LAN_SUBNET" ]]; then
+    echo "Клиентам доступны туннель $WG_SUBNET.0/24 и сеть $LAN_SUBNET."
+  else
+    echo "Клиентам доступен только туннель $WG_SUBNET.0/24 (сервер и его соседи по LAN — по IP)."
+  fi
+fi
 echo
 echo "Клиентские конфиги (не публикуйте их, это ваши ключи):"
 for f in "${CLIENT_CONFS[@]}"; do echo "  $f"; done

@@ -89,6 +89,20 @@ if [[ -z "$ENDPOINT" ]]; then
 fi
 MTU="$(awk -F' = ' '/^MTU/ {print $2; exit}' "$WG_CONF")"
 
+# Режим сервера определяем по его же правилам NAT:
+# есть MASQUERADE без -d (весь трафик в интернет) -> full, иначе --lan-only.
+CLIENT_ALLOWED="0.0.0.0/0, ::/0"
+CLIENT_DNS="$DNS_SERVERS"
+LAN_ONLY=0
+if ! grep -qE "POSTROUTING -s $SUBNET\.0/24 -o [^ ]+ -j MASQUERADE" "$WG_CONF"; then
+  LAN_ONLY=1
+  CLIENT_ALLOWED="$SUBNET.0/24"
+  while read -r lan; do
+    [[ -n "$lan" ]] && CLIENT_ALLOWED="$CLIENT_ALLOWED, $lan"
+  done < <(grep -oE -- '-d [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+' "$WG_CONF" | awk '{print $2}' | sort -u)
+  CLIENT_DNS=""     # в режиме только-свои-сети внешний DNS не навязываем
+fi
+
 C_PRIV="$(wg genkey)"
 C_PUB="$(printf '%s' "$C_PRIV" | wg pubkey)"
 C_PSK="$(wg genpsk)"
@@ -101,14 +115,16 @@ umask 077
   echo "[Interface]"
   echo "PrivateKey = $C_PRIV"
   echo "Address = $C_IP/32"
-  echo "DNS = $DNS_SERVERS"
+  if [[ -n "$CLIENT_DNS" ]]; then
+    echo "DNS = $CLIENT_DNS"
+  fi
   echo "MTU = ${MTU:-1420}"
   echo
   echo "[Peer]"
   echo "PublicKey = $SERVER_PUB"
   echo "PresharedKey = $C_PSK"
   echo "Endpoint = $ENDPOINT"
-  echo "AllowedIPs = 0.0.0.0/0, ::/0"
+  echo "AllowedIPs = $CLIENT_ALLOWED"
   echo "PersistentKeepalive = 25"
 } >"$CFILE"
 chmod 600 "$CFILE"

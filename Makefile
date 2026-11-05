@@ -10,6 +10,7 @@ help: ## Показать список целей
 	@echo "Подготовка (ничего не меняет в системе):"
 	@echo "  make check          прогнать самопроверку всех скриптов"
 	@echo "  make wg-dry         сгенерировать примеры WireGuard-конфигов"
+	@echo "  make wg-lan-dry     примеры для сервера в РФ (--lan-only, без выхода в интернет)"
 	@echo "  make awg-dry        сгенерировать примеры AmneziaWG-конфигов"
 	@echo "  make xray-dry       сгенерировать пример config.json + ссылку VLESS"
 	@echo "  make clean          удалить каталог $(OUT)"
@@ -24,6 +25,10 @@ check: ## Самопроверка репозитория
 
 wg-dry: ## Примеры WireGuard-конфигов
 	bash wireguard/install-wireguard.sh --dry-run --clients 2 --out "$(OUT)/wg"
+
+wg-lan-dry: ## Примеры для сервера в РФ: только свои сети, без выхода в интернет
+	bash wireguard/install-wireguard.sh --dry-run --lan-only --lan 192.168.1.0/24 \
+		--clients 2 --out "$(OUT)/wg-lan"
 
 awg-dry: ## Примеры AmneziaWG-конфигов
 	bash amneziawg/install-amneziawg.sh --dry-run --clients 2 --out "$(OUT)/awg"
