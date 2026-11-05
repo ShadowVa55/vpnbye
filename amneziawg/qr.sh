@@ -18,11 +18,16 @@ die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 TARGET="${1:-}"
-[[ -n "$TARGET" ]] || { sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+if [[ -z "$TARGET" ]]; then
+  sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'
+  echo "Подсказка: bash amneziawg/qr.sh --list — показать все конфиги и где лежат их QR"
+  exit 2
+fi
 shift || true
 
 PNG_OUT=""
 SHOW_TEXT=0
+LIST_MODE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --png)  PNG_OUT="${2:?--png требует путь}"; shift 2 ;;
@@ -31,6 +36,41 @@ while [[ $# -gt 0 ]]; do
     *) die "Неизвестная опция: $1" ;;
   esac
 done
+
+# --- режим списка: все найденные конфиги и их QR ---
+if [[ "$TARGET" == "--list" || "$TARGET" == "-l" ]]; then
+  printf '\033[1mКонфиги AmneziaWG и их QR-коды\033[0m\n\n'
+  printf '%-58s %s\n' 'КОНФИГ' 'QR'
+  printf '%-58s %s\n' '------' '--'
+  declare -A seen=()
+  found=0
+  shopt -s nullglob
+  for d in "$HOME/awg-clients" "/root/awg-clients" \
+           "$HOME/ru-mobile/awg-443" "/root/ru-mobile/awg-443" \
+           "$HOME/ru-mobile/awg-2408" "/root/ru-mobile/awg-2408" "$PWD"; do
+    [[ -n "${seen[$d]:-}" ]] && continue
+    seen[$d]=1
+    for f in "$d"/*.conf; do
+      found=1
+      if [[ -f "${f%.conf}.png" ]]; then
+        printf '%-58s %s\n' "$f" "${f%.conf}.png"
+      else
+        printf '%-58s %s\n' "$f" "нет — создаст: bash amneziawg/qr.sh $f"
+      fi
+    done
+  done
+  shopt -u nullglob
+  if (( found == 0 )); then
+    warn "Конфигов не нашёл в стандартных каталогах."
+    echo "  Возможно, VPN ещё не установлен или конфиги лежат в другом месте. Поиск по диску:" >&2
+    echo "    sudo find /root /home /etc -name '*.conf' -path '*awg*' 2>/dev/null" >&2
+    echo "    sudo find /root /home -name 'client*.png' 2>/dev/null" >&2
+    exit 1
+  fi
+  echo
+  echo "Показать QR в терминале:  bash amneziawg/qr.sh <имя-или-путь>"
+  exit 0
+fi
 
 # --- ищем конфиг ---
 CONF=""

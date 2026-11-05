@@ -390,6 +390,21 @@ else
   grep -q 'уточните путь' "$TMP/qr2.log" && ok "при двух совпадениях просит указать путь" || bad "нет понятного сообщения о неоднозначности"
 fi
 
+# режим списка: должен показать конфиги и подсказать, где QR
+if qr_run --list >"$TMP/qrlist.log" 2>&1; then
+  grep -q 'client1.conf' "$TMP/qrlist.log" && ok "qr.sh --list перечисляет конфиги" || bad "qr.sh --list не показал client1.conf"
+  grep -q 'QR' "$TMP/qrlist.log" && ok "qr.sh --list показывает статус QR" || bad "qr.sh --list без колонки QR"
+else
+  bad "qr.sh --list завершился ошибкой"
+fi
+
+# если конфигов нет — должна быть подсказка, где искать
+if HOME="$TMP/empty-home" bash "$ROOT/amneziawg/qr.sh" --list >/dev/null 2>"$TMP/qrempty.log"; then
+  bad "qr.sh --list не отличил пустой каталог от каталога с конфигами"
+else
+  grep -q 'find' "$TMP/qrempty.log" && ok "когда конфигов нет — подсказывает команду поиска" || bad "нет подсказки, как найти конфиги"
+fi
+
 head_ "Итог"
 printf '  пройдено: %s, провалено: %s\n' "$PASS" "$FAIL"
 (( FAIL == 0 )) || exit 1
