@@ -298,6 +298,14 @@ if bash "$ROOT/scripts/install-for-ru-mobile.sh" --dry-run --out "$MO" >"$TMP/mo
   grep -q 'preflight.sh' "$TMP/mo.log" \
     && ok "в конце вызывается preflight" || bad "preflight не вызывается"
   [[ -d "$MO" ]] && bad "dry-run создал каталог $MO" || ok "dry-run ничего не создал"
+  # повторный запуск: флаг --force должен уходить во вложенные установщики
+  if bash "$ROOT/scripts/install-for-ru-mobile.sh" --dry-run --force --out "$TMP/mobile2" >"$TMP/mo2.log" 2>&1; then
+    grep -q 'install-amneziawg.sh.*--force' "$TMP/mo2.log" && grep -q 'install-xray-reality.sh.*--force' "$TMP/mo2.log" \
+      && ok "флаг --force прокидывается в установщики" || bad "флаг --force не прокидывается"
+    grep -q -- '--force' "$TMP/mo.log" && bad "без флага --force он всё равно попал в команды" || ok "без --force команды чистые"
+  else
+    bad "--dry-run --force упал"
+  fi
 else
   bad "install-for-ru-mobile.sh --dry-run упал:"
   sed 's/^/       /' "$TMP/mo.log" | tail -15

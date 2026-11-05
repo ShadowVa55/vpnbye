@@ -23,6 +23,7 @@ SNI="${SNI:-www.microsoft.com}"
 CLIENTS="${CLIENTS:-2}"
 NAMES="${NAMES:-}"
 WITH_ALT=1
+FORCE=0
 DRY_RUN=0
 
 log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
@@ -38,6 +39,7 @@ usage() {
   --names LIST    имена клиентов REALITY через запятую (по умолчанию client1..N)
   --out DIR       куда складывать клиентские файлы (по умолчанию /root/ru-mobile)
   --no-alt        не поднимать резервный AmneziaWG на UDP/2408
+  --force         перезаписать уже созданные конфиги (если прошлая установка оборвалась)
   --dry-run       показать команды, ничего не выполняя
   -h, --help      эта справка
 EOF
@@ -50,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     --names)    NAMES="${2:?}"; shift 2 ;;
     --out)      OUT_BASE="${2:?}"; shift 2 ;;
     --no-alt)   WITH_ALT=0; shift ;;
+    --force)    FORCE=1; shift ;;
     --dry-run)  DRY_RUN=1; shift ;;
     -h|--help)  usage; exit 0 ;;
     *)          die "Неизвестная опция: $1 (см. --help)" ;;
@@ -73,25 +76,29 @@ run() {
 (( DRY_RUN == 1 )) || mkdir -p "$OUT_BASE"
 (( DRY_RUN == 1 )) || chmod 700 "$OUT_BASE"
 
+# при повторном запуске передаём --force во вложенные установщики
+extra=()
+(( FORCE == 1 )) && extra+=(--force)
+
 log "Канал 1/3: AmneziaWG на UDP/443 (основной для мобильных операторов)"
 run bash "$ROOT/amneziawg/install-amneziawg.sh" \
   --port 443 --clients "$CLIENTS" --mtu 1280 \
-  --out "$OUT_BASE/awg-443"
+  "${extra[@]}" --out "$OUT_BASE/awg-443"
 
 if (( WITH_ALT == 1 )); then
   log "Канал 2/3: AmneziaWG на UDP/2408 (резерв, интерфейс awg1)"
   run env AWG_IFACE=awg1 bash "$ROOT/amneziawg/install-amneziawg.sh" \
     --port 2408 --clients "$CLIENTS" --mtu 1280 --subnet 10.9.9 \
-    --out "$OUT_BASE/awg-2408"
+    "${extra[@]}" --out "$OUT_BASE/awg-2408"
 fi
 
 log "Канал 3/3: Xray VLESS+REALITY на TCP/443, прикрытие: $SNI"
 if [[ -n "$NAMES" ]]; then
   run bash "$ROOT/xray/install-xray-reality.sh" \
-    --sni "$SNI" --names "$NAMES" --out "$OUT_BASE/reality"
+    --sni "$SNI" --names "$NAMES" "${extra[@]}" --out "$OUT_BASE/reality"
 else
   run bash "$ROOT/xray/install-xray-reality.sh" \
-    --sni "$SNI" --clients "$CLIENTS" --out "$OUT_BASE/reality"
+    --sni "$SNI" --clients "$CLIENTS" "${extra[@]}" --out "$OUT_BASE/reality"
 fi
 
 log "Диагностика"
