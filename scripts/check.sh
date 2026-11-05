@@ -263,6 +263,28 @@ else
   bad "нет $XR_OUT/config.json — пропускаю тест add-client.sh"
 fi
 
+head_ "7. Ссылки в документации"
+while IFS= read -r md; do
+  dir="$(dirname "$md")"
+  while IFS= read -r link; do
+    [[ -z "$link" ]] && continue
+    [[ "$link" == http* ]] && continue
+    if [[ -e "$dir/$link" ]]; then
+      ok "${md#$ROOT/} -> $link"
+    else
+      bad "${md#$ROOT/} -> $link (файла нет)"
+    fi
+  done < <(grep -oE '\]\([^)#]+\.md' "$md" 2>/dev/null | sed 's/^](//')
+done < <(find "$ROOT" -name '*.md' -not -path '*/.git/*' | sort)
+
+head_ "8. preflight.sh"
+if bash "$ROOT/scripts/preflight.sh" --quiet >"$TMP/pf.log" 2>&1; then
+  ok "preflight.sh --quiet отработал (на любой системе это только диагностика)"
+else
+  bad "preflight.sh вернул ошибку:"
+  sed 's/^/       /' "$TMP/pf.log" | tail -15
+fi
+
 head_ "Итог"
 printf '  пройдено: %s, провалено: %s\n' "$PASS" "$FAIL"
 (( FAIL == 0 )) || exit 1

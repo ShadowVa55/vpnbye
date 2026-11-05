@@ -8,8 +8,8 @@ wireguard/        WireGuard — быстро и просто
 amneziawg/        AmneziaWG — тот же WireGuard, но с обфускацией (обход DPI)
 xray/             VLESS + REALITY — маскировка под обычный HTTPS
 docker/wg-easy/   WireGuard с веб-панелью и QR-кодами
-docs/             выбор протокола, сервер, клиенты, диагностика, сервер в РФ
-scripts/check.sh  самопроверка всего репозитория
+docs/             выбор протокола, сервер, клиенты, диагностика, работа из РФ
+scripts/          check.sh — самопроверка репозитория, preflight.sh — диагностика сервера
 ```
 
 ## Быстрый старт (10 минут)
@@ -60,6 +60,24 @@ sudo bash wireguard/install-wireguard.sh --lan-only --lan 192.168.1.0/24 --clien
 Для обхода блокировок сервер нужен **за границей** (NL/DE/FI/SE) + AmneziaWG или
 REALITY. Разбор обоих сценариев, юридических нюансов и выбора хостера:
 [docs/05-server-in-russia.md](docs/05-server-in-russia.md)
+
+## Если пользуетесь из России
+
+Тогда сервер — за границей, а протокол — с обфускацией (обычный WireGuard ТСПУ режет):
+
+```bash
+# основной вариант: «непонятный» UDP на 443
+sudo bash amneziawg/install-amneziawg.sh --clients 2 --port 443
+
+# резервный на том же сервере: маскировка под HTTPS (TCP/443 не конфликтует с UDP/443)
+sudo bash xray/install-xray-reality.sh --names phone,laptop --sni www.microsoft.com
+
+# проверить, что всё живо: часы, NAT, порты, сайт-прикрытие, MTU
+sudo bash scripts/preflight.sh
+```
+
+Что выбрать, как подобрать порт и `--sni`, почему «сайты грузятся наполовину» и
+что делать при блокировке IP: [docs/06-using-from-russia.md](docs/06-using-from-russia.md)
 
 ## Что умеют скрипты
 

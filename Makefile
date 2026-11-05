@@ -9,6 +9,7 @@ help: ## Показать список целей
 	@echo
 	@echo "Подготовка (ничего не меняет в системе):"
 	@echo "  make check          прогнать самопроверку всех скриптов"
+	@echo "  make preflight      диагностика настроенного сервера (нужен root)"
 	@echo "  make wg-dry         сгенерировать примеры WireGuard-конфигов"
 	@echo "  make wg-lan-dry     примеры для сервера в РФ (--lan-only, без выхода в интернет)"
 	@echo "  make awg-dry        сгенерировать примеры AmneziaWG-конфигов"
@@ -22,6 +23,9 @@ help: ## Показать список целей
 
 check: ## Самопроверка репозитория
 	bash scripts/check.sh
+
+preflight: ## Диагностика сервера (что сломает подключение из РФ)
+	sudo bash scripts/preflight.sh
 
 wg-dry: ## Примеры WireGuard-конфигов
 	bash wireguard/install-wireguard.sh --dry-run --clients 2 --out "$(OUT)/wg"

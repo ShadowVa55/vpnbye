@@ -94,6 +94,29 @@ gen_uuid() {
   fi
 }
 
+# REALITY «занимает» TLS настоящего сайта: он должен отвечать TLS 1.3 + HTTP/2,
+# иначе часть клиентов не подключится. Проверяем прямо на сервере.
+check_dest() {
+  local host="$1"
+  if have curl; then
+    local code
+    code="$(curl -fsSI --max-time 8 "https://$host" -o /dev/null -w '%{http_code}' 2>/dev/null || echo 000)"
+    if [[ "$code" == "000" ]]; then
+      warn "сайт-прикрытие $host недоступен с сервера — REALITY не заработает"
+      return 1
+    fi
+  fi
+  if have openssl; then
+    if echo | timeout 10 openssl s_client -connect "$host:443" -tls1_3 -alpn h2 \
+         -servername "$host" 2>/dev/null | grep -q 'ALPN protocol: h2'; then
+      return 0
+    fi
+    warn "$host не подтвердил TLS 1.3 + HTTP/2 — REALITY может работать нестабильно"
+    return 1
+  fi
+  return 0
+}
+
 detect_ip() {
   local ip=""
   for url in https://api.ipify.org https://ifconfig.me/ip https://icanhazip.com; do
@@ -113,6 +136,7 @@ if (( DRY_RUN == 0 )); then
   if ss -ltnp 2>/dev/null | grep -q ":$XRAY_PORT "; then
     warn "Порт TCP/$XRAY_PORT уже занят — REALITY не сможет слушать"
   fi
+  check_dest "$SNI" || warn "Продолжаю установку, но сайт-прикрытие лучше сменить: --sni www.samsung.com (или dl.google.com)"
 else
   CONF="$OUT_DIR/config.json"
   mkdir -p "$OUT_DIR"

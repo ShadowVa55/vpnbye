@@ -153,6 +153,9 @@ if (( DRY_RUN == 0 )); then
   if have ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then
     ufw allow "$AWG_PORT"/udp >/dev/null && log "Открыл UDP/$AWG_PORT в ufw"
   fi
+  if have ss && ss -lun 2>/dev/null | grep -q ":$AWG_PORT "; then
+    warn "UDP/$AWG_PORT уже занят другим процессом — выберите другой порт (--port 443)"
+  fi
   CONF_DIR="$(awg_conf_dir)"
 else
   CONF_DIR="$OUT_DIR/server"
