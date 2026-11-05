@@ -1,0 +1,50 @@
+# wg-easy v15 — WireGuard + веб-панель (docker compose)
+#
+# Быстрый вариант «свой VPN за 5 минут», если не хочется править конфиги руками:
+# панель создаёт клиентов и QR-коды в один клик.
+#
+# Запуск на сервере:
+#   cd docker/wg-easy
+#   cp .env.example .env      # при желании поменять порты/INSECURE
+#   docker compose up -d
+#   открыть http://IP_СЕРВЕРА:51821 и создать администратора при первом входе
+#
+# Не забудьте открыть в firewall UDP/51820 (и TCP/51821, если панель нужна снаружи).
+# Шаблон повторяет официальный: https://github.com/wg-easy/wg-easy/blob/master/docker-compose.yml
+
+volumes:
+  etc_wireguard:
+
+services:
+  wg-easy:
+    image: ghcr.io/wg-easy/wg-easy:15
+    container_name: wg-easy
+    environment:
+      - PORT=51821
+      - HOST=0.0.0.0
+      # INSECURE=true разрешает вход по http:// без HTTPS.
+      # Для постоянной работы закройте панель за reverse-proxy (Caddy/Traefik) с TLS
+      # и поставьте INSECURE=false.
+      - INSECURE=${INSECURE:-true}
+    volumes:
+      - etc_wireguard:/etc/wireguard
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - "${WG_PORT:-51820}:51820/udp"
+      - "${UI_PORT:-51821}:51821/tcp"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+
+# Если остаётесь на версии 14 (image: ghcr.io/wg-easy/wg-easy:14), панель требует
+# пароль в виде bcrypt-хеша. В .env его надо заключать в ОДИНАРНЫЕ кавычки,
+# иначе docker compose попытается подставить $2b/$12 как переменные:
+#   PASSWORD_HASH='$2b$12$........................................................'
+# Сгенерировать хеш:
+#   docker run --rm ghcr.io/wg-easy/wg-easy:14 \
+#     node -e "console.log(require('bcryptjs').hashSync(process.argv[1], 12))" 'МОЙ_ПАРОЛЬ'
+
