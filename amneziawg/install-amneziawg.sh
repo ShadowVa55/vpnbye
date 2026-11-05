@@ -234,6 +234,12 @@ for i in $(seq 1 "$CLIENTS"); do
   } >"$cfile"
   chmod 600 "$cfile"
 
+  # QR-код: PNG (отправить в мессенджер) + ANSI (показать в терминале/по SSH)
+  if (( DRY_RUN == 0 )) && have qrencode; then
+    qrencode -t png -o "$OUT_DIR/$name.png" -r "$cfile" 2>/dev/null || warn "PNG QR для $name не создан"
+    qrencode -t ansiutf8 -r "$cfile" >"$OUT_DIR/$name.qr.txt" 2>/dev/null || true
+  fi
+
   {
     echo "[Peer]"
     echo "# $name"
@@ -249,6 +255,11 @@ if (( DRY_RUN == 1 )); then
   exit 0
 fi
 
+if ! have qrencode; then
+  warn "qrencode не установлен — QR не создан. Поставьте: apt install -y qrencode"
+  warn "Затем: bash amneziawg/qr.sh $OUT_DIR/client1.conf"
+fi
+
 log "Запускаю $AWG_IFACE"
 systemctl enable --now "awg-quick@$AWG_IFACE" >/dev/null 2>&1 || awg-quick up "$AWG_IFACE"
 sleep 1
@@ -258,8 +269,19 @@ fi
 
 log "Готово! AmneziaWG слушает UDP/$AWG_PORT, endpoint $ENDPOINT_ADDR"
 echo
-echo "Дальше: установите приложение AmneziaVPN (Windows/macOS/Linux/Android/iOS),"
-echo "добавьте сервер вручную ('Я хочу настроить свой VPN' -> протокол AmneziaWG)"
-echo "или импортируйте файл $OUT_DIR/client1.conf / отсканируйте QR."
+echo "Дальше: установите приложение AmneziaVPN или AmneziaWG (Windows/macOS/Linux/Android/iOS)"
+echo "и добавьте туннель одним из способов:"
+echo "  1) отсканировать QR:  $OUT_DIR/client1.png"
+echo "  2) импорт файла:      $OUT_DIR/client1.conf"
+echo "  3) вручную:           'Добавить туннель' -> протокол AmneziaWG, поля из client1.conf"
+echo
+if have qrencode && [[ -f "$OUT_DIR/client1.png" ]]; then
+  echo "QR первого клиента (тот же, что в client1.png):"
+  qrencode -t ansiutf8 -r "$OUT_DIR/client1.conf"
+  echo
+fi
+echo "QR для любого клиента в любой момент:"
+echo "  bash amneziawg/qr.sh client1            # PNG + QR в терминале"
+echo "  bash amneziawg/qr.sh /путь/к/файлу.conf --png ~/tunnel.png"
 echo "Статус: awg show"
 

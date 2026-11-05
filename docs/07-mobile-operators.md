@@ -72,6 +72,9 @@ sudo bash scripts/install-for-ru-mobile.sh --dry-run    # сначала пос�
 | Windows/macOS | AmneziaVPN, Hiddify | то же |
 
 Ссылку `vless://…` удобнее всего передавать QR-кодом (скрипты печатают его в терминале).
+Для AmneziaWG QR делается из конфига: `bash amneziawg/qr.sh client1` — он же
+сохраняет `client1.png`, который можно просто отправить в мессенджер.
+Подробно про все три способа добавления: [03-clients.md](03-clients.md).
 
 ## Что проверить у себя, если совсем ничего не работает
 

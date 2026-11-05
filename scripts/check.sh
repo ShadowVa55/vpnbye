@@ -334,6 +334,62 @@ else
   bad "preflight не определил порт awg1"
 fi
 
+head_ "11. QR для AmneziaWG (qr.sh)"
+QT="$TMP/qr"
+mkdir -p "$QT/stub" "$QT/awg-clients" "$QT/ru-mobile/awg-443" "$QT/ru-mobile/awg-2408"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'type=""; out=""; in=""' \
+  'while [[ $# -gt 0 ]]; do case "$1" in -t) type="$2"; shift 2;; -o) out="$2"; shift 2;; -r) in="$2"; shift 2;; *) shift;; esac; done' \
+  'case "$type" in' \
+  '  png) printf "PNG:%s\n" "$(wc -c <"$in")" > "$out" ;;' \
+  '  ansiutf8) printf "QR-ANSI-BEGIN\n"; cat "$in"; printf "QR-ANSI-END\n" ;;' \
+  '  *) exit 1 ;;' \
+  'esac' >"$QT/stub/qrencode"
+chmod +x "$QT/stub/qrencode"
+
+cp "$A1/client1.conf" "$QT/awg-clients/client1.conf"
+qr_run() { PATH="$QT/stub:$PATH" HOME="$QT" bash "$ROOT/amneziawg/qr.sh" "$@"; }
+
+if qr_run client1 >"$TMP/qr.log" 2>&1; then
+  ok "qr.sh нашёл конфиг по имени"
+  grep -q 'QR-ANSI-BEGIN' "$TMP/qr.log" && grep -q 'Jc = ' "$TMP/qr.log" \
+    && ok "qr.sh вывел QR (в нём весь конфиг с параметрами обфускации)" \
+    || bad "qr.sh не вывел QR в терминал"
+  [[ -s "$QT/awg-clients/client1.png" ]] && ok "PNG рядом с конфигом создан" || bad "PNG не создан"
+else
+  bad "qr.sh не смог обработать client1:"
+  sed 's/^/       /' "$TMP/qr.log" | tail -10
+fi
+
+if qr_run client1 --png "$QT/custom.png" >/dev/null 2>&1 && [[ -s "$QT/custom.png" ]]; then
+  ok "qr.sh --png сохраняет по указанному пути"
+else
+  bad "qr.sh --png не работает"
+fi
+
+if qr_run client1 --text >"$TMP/qrtext.log" 2>&1 && grep -q '^\[Interface\]' "$TMP/qrtext.log"; then
+  ok "qr.sh --text печатает конфиг для ручного ввода"
+else
+  bad "qr.sh --text не работает"
+fi
+
+# битый конфиг должен отвергаться
+grep -v '^\[Peer\]' "$QT/awg-clients/client1.conf" >"$QT/awg-clients/broken.conf"
+if qr_run broken >/dev/null 2>"$TMP/qrerr.log"; then
+  bad "qr.sh принял конфиг без [Peer]"
+else
+  grep -q 'не хватает' "$TMP/qrerr.log" && ok "qr.sh отклоняет неполный конфиг" || bad "qr.sh упал без объяснения"
+fi
+
+# два одинаковых имени в awg-443 и awg-2408 — должен потребовать уточнения
+cp "$A1/client1.conf" "$QT/ru-mobile/awg-443/twin.conf"
+cp "$A1/client1.conf" "$QT/ru-mobile/awg-2408/twin.conf"
+if qr_run twin >/dev/null 2>"$TMP/qr2.log"; then
+  bad "qr.sh выбрал конфиг наугад при двух совпадениях"
+else
+  grep -q 'уточните путь' "$TMP/qr2.log" && ok "при двух совпадениях просит указать путь" || bad "нет понятного сообщения о неоднозначности"
+fi
+
 head_ "Итог"
 printf '  пройдено: %s, провалено: %s\n' "$PASS" "$FAIL"
 (( FAIL == 0 )) || exit 1

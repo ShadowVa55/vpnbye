@@ -5,7 +5,7 @@
 
 ```
 wireguard/        WireGuard — быстро и просто
-amneziawg/        AmneziaWG — тот же WireGuard, но с обфускацией (обход DPI)
+amneziawg/        AmneziaWG — тот же WireGuard, но с обфускацией (обход DPI) + qr.sh для QR
 xray/             VLESS + REALITY — маскировка под обычный HTTPS
 docker/wg-easy/   WireGuard с веб-панелью и QR-кодами
 docs/             выбор протокола, сервер, клиенты, диагностика, работа из РФ, операторы
@@ -74,6 +74,13 @@ sudo bash scripts/install-for-ru-mobile.sh --dry-run  # сначала посм�
 
 Клиентские файлы складываются в `~/ru-mobile/` (плюс шпаргалка `README.txt`):
 не работает один канал — переключаетесь в другой за 10 секунд.
+
+QR-код для добавления туннеля в приложение AmneziaVPN / AmneziaWG:
+
+```bash
+bash amneziawg/qr.sh client1                              # QR в терминале + PNG рядом
+bash amneziawg/qr.sh /root/ru-mobile/awg-443/client1.conf --png ~/mts.png
+```
 
 Вручную, если хотите по одному каналу:
 

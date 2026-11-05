@@ -18,6 +18,7 @@ help: ## Показать список целей
 	@echo
 	@echo "Установка на сервере (нужен root):"
 	@echo "  make ru-mobile      все каналы для МТС/Билайн/Мегафон (3 профиля клиентам)"
+	@echo "  make qr C=client1   QR-код для клиента AmneziaWG (PNG + в терминале)"
 	@echo "  make wg             WireGuard"
 	@echo "  make awg            AmneziaWG (обфускация)"
 	@echo "  make xray           Xray VLESS+REALITY"
@@ -33,6 +34,9 @@ ru-mobile: ## Поднять сразу 3 канала под МТС/Билай�
 
 ru-mobile-dry: ## Показать, что сделает ru-mobile, ничего не меняя
 	bash scripts/install-for-ru-mobile.sh --dry-run
+
+qr: ## QR для клиента AmneziaWG: make qr C=client1
+	bash amneziawg/qr.sh "$(or $(C),client1)"
 
 wg-dry: ## Примеры WireGuard-конфигов
 	bash wireguard/install-wireguard.sh --dry-run --clients 2 --out "$(OUT)/wg"
