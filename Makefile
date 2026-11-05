@@ -17,6 +17,7 @@ help: ## Показать список целей
 	@echo "  make clean          удалить каталог $(OUT)"
 	@echo
 	@echo "Установка на сервере (нужен root):"
+	@echo "  make ru-mobile      все каналы для МТС/Билайн/Мегафон (3 профиля клиентам)"
 	@echo "  make wg             WireGuard"
 	@echo "  make awg            AmneziaWG (обфускация)"
 	@echo "  make xray           Xray VLESS+REALITY"
@@ -26,6 +27,12 @@ check: ## Самопроверка репозитория
 
 preflight: ## Диагностика сервера (что сломает подключение из РФ)
 	sudo bash scripts/preflight.sh
+
+ru-mobile: ## Поднять сразу 3 канала под МТС/Билайн/Мегафон (UDP/443 + UDP/2408 + REALITY)
+	sudo bash scripts/install-for-ru-mobile.sh
+
+ru-mobile-dry: ## Показать, что сделает ru-mobile, ничего не меняя
+	bash scripts/install-for-ru-mobile.sh --dry-run
 
 wg-dry: ## Примеры WireGuard-конфигов
 	bash wireguard/install-wireguard.sh --dry-run --clients 2 --out "$(OUT)/wg"

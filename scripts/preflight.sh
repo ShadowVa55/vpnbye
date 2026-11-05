@@ -33,9 +33,17 @@ sect() { (( QUIET == 1 )) || printf '\n\033[1m%s\033[0m\n' "$*"; }
 # текстовый вывод без счётчиков (только в полном режиме)
 info() { (( QUIET == 1 )) || printf '        %s\n' "$*"; }
 
-WG_CONF="${WG_CONF:-/etc/wireguard/wg0.conf}"
-AWG_CONF="${AWG_CONF:-/etc/amnezia/amneziawg/awg0.conf}"
+WG_CONF="${WG_CONF:-}"
+AWG_CONF="${AWG_CONF:-}"
+WG_DIR="${WG_DIR:-/etc/wireguard}"
+AWG_DIR="${AWG_DIR:-/etc/amnezia/amneziawg}"
 XRAY_CONF="${XRAY_CONF:-/usr/local/etc/xray/config.json}"
+
+# находим все интерфейсы (может быть и wg0, и awg0, и awg1 — оркестратор поднимает несколько)
+shopt -s nullglob
+if [[ -n "$WG_CONF" && -f "$WG_CONF" ]]; then WG_CONFS=("$WG_CONF"); else WG_CONFS=("$WG_DIR"/*.conf); fi
+if [[ -n "$AWG_CONF" && -f "$AWG_CONF" ]]; then AWG_CONFS=("$AWG_CONF"); else AWG_CONFS=("$AWG_DIR"/*.conf); fi
+shopt -u nullglob
 
 # ------------------------------------------------------------------ система ---
 sect "1. Система"
@@ -84,53 +92,65 @@ fi
 
 # --------------------------------------------------------------- сервисы ---
 sect "4. WireGuard / AmneziaWG"
-wg_port=51820; awg_port=51820
-if [[ -f "$WG_CONF" ]]; then
-  wg_port="$(awk -F' = ' '/^ListenPort/ {print $2; exit}' "$WG_CONF")"
-  ok "конфиг WireGuard найден: $WG_CONF (порт $wg_port)"
-  if systemctl is-active --quiet wg-quick@wg0 2>/dev/null; then
-    ok "сервис wg-quick@wg0 активен"
+ports=()
+if (( ${#WG_CONFS[@]} == 0 )); then
+  info "WireGuard не настроен (${WG_DIR}/*.conf отсутствует)"
+fi
+for conf in "${WG_CONFS[@]}"; do
+  iface="$(basename "$conf" .conf)"
+  port="$(awk -F' = ' '/^ListenPort/ {print $2; exit}' "$conf")"
+  ok "WireGuard: $conf (порт ${port:-?})"
+  [[ -n "$port" ]] && ports+=("$port")
+  if systemctl is-active --quiet "wg-quick@$iface" 2>/dev/null; then
+    ok "сервис wg-quick@$iface активен"
     if has wg; then
-      peers="$(wg show wg0 peers 2>/dev/null | wc -l)"
-      info "пиров: ${peers}"
-      now="$(date +%s)"
-      stale=0
-      while read -r pub hs; do
+      info "пиров: $(wg show "$iface" peers 2>/dev/null | wc -l)"
+      now="$(date +%s)"; stale=0
+      while read -r _pub hs; do
         [[ -z "${hs:-}" || "$hs" == "0" ]] && continue
         (( now - hs > 300 )) && stale=$((stale+1))
-      done < <(wg show wg0 latest-handshakes 2>/dev/null)
-      (( stale == 0 )) && ok "все активные пиры с недавним рукопожатием" \
-                       || wrn "пиров без рукопожатия > 5 мин: ${stale} (клиент не подключается?)"
+      done < <(wg show "$iface" latest-handshakes 2>/dev/null)
+      (( stale == 0 )) && ok "$iface: у активных пиров свежее рукопожатие" \
+                       || wrn "$iface: пиров без рукопожатия > 5 мин: ${stale} (клиент не подключается?)"
     fi
   else
-    bad "сервис wg-quick@wg0 не активен: journalctl -u wg-quick@wg0 -n 30"
+    bad "сервис wg-quick@$iface не активен: journalctl -u wg-quick@$iface -n 30"
   fi
-else
-  info "WireGuard не настроен ($WG_CONF отсутствует)"
-fi
+done
 
-if [[ -f "$AWG_CONF" ]]; then
-  awg_port="$(awk -F' = ' '/^ListenPort/ {print $2; exit}' "$AWG_CONF")"
-  ok "конфиг AmneziaWG найден: $AWG_CONF (порт $awg_port)"
-  if systemctl is-active --quiet awg-quick@awg0 2>/dev/null; then ok "сервис awg-quick@awg0 активен"
-  else bad "сервис awg-quick@awg0 не активен: journalctl -u awg-quick@awg0 -n 30"; fi
+if (( ${#AWG_CONFS[@]} == 0 )); then
+  info "AmneziaWG не настроен (${AWG_DIR}/*.conf отсутствует)"
+fi
+for conf in "${AWG_CONFS[@]}"; do
+  iface="$(basename "$conf" .conf)"
+  port="$(awk -F' = ' '/^ListenPort/ {print $2; exit}' "$conf")"
+  ok "AmneziaWG: $conf (порт ${port:-?})"
+  [[ -n "$port" ]] && ports+=("$port")
+  if systemctl is-active --quiet "awg-quick@$iface" 2>/dev/null; then
+    ok "сервис awg-quick@$iface активен"
+  else
+    bad "сервис awg-quick@$iface не активен: journalctl -u awg-quick@$iface -n 30"
+  fi
   if has awg; then
-    hs="$(awg show awg0 latest-handshakes 2>/dev/null | awk '$2>0 {print $2}' | sort -n | tail -1)"
+    hs="$(awg show "$iface" latest-handshakes 2>/dev/null | awk '$2>0 {print $2}' | sort -n | tail -1)"
     if [[ -n "$hs" ]]; then
       age=$(( $(date +%s) - hs ))
-      (( age < 300 )) && ok "есть недавнее рукопожатие (${age} c назад)" \
-                      || wrn "последнее рукопожатие ${age} c назад — клиенты не проходят DPI?"
+      (( age < 300 )) && ok "$iface: недавнее рукопожатие (${age} c назад)" \
+                      || wrn "$iface: последнее рукопожатие ${age} c назад — клиенты не проходят DPI?"
     else
-      wrn "рукопожатий ещё не было (клиенты не подключались)"
+      wrn "$iface: рукопожатий ещё не было (клиенты не подключались)"
     fi
   fi
-else
-  info "AmneziaWG не настроен ($AWG_CONF отсутствует)"
-fi
+done
 
 sect "5. Слушающие порты"
+if (( ${#ports[@]} > 0 )); then
+  # убираем дубликаты
+  mapfile -t ports < <(printf '%s\n' "${ports[@]}" | sort -un)
+fi
 if has ss; then
-  for p in "$wg_port" "$awg_port"; do
+  for p in "${ports[@]:-}"; do
+    [[ -z "$p" ]] && continue
     if ss -lun 2>/dev/null | grep -q ":${p} "; then ok "UDP/${p} слушается"; else wrn "UDP/${p} не слушается"; fi
   done
   if ss -ltn 2>/dev/null | grep -q ':443 '; then ok "TCP/443 слушается"; else info "TCP/443 не слушается (норма, если Xray не используется)"; fi

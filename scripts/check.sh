@@ -285,6 +285,55 @@ else
   sed 's/^/       /' "$TMP/pf.log" | tail -15
 fi
 
+head_ "9. Оркестратор под мобильные операторы (dry-run)"
+MO="$TMP/mobile"
+if bash "$ROOT/scripts/install-for-ru-mobile.sh" --dry-run --out "$MO" >"$TMP/mo.log" 2>&1; then
+  ok "install-for-ru-mobile.sh --dry-run"
+  grep -q 'install-amneziawg.sh --port 443' "$TMP/mo.log" \
+    && ok "канал 1: AmneziaWG на UDP/443" || bad "нет команды для UDP/443"
+  grep -q 'AWG_IFACE=awg1' "$TMP/mo.log" \
+    && ok "канал 2: отдельный интерфейс awg1 на UDP/2408" || bad "нет резервного канала awg1"
+  grep -q 'install-xray-reality.sh.*--sni' "$TMP/mo.log" \
+    && ok "канал 3: REALITY с проверкой SNI" || bad "нет команды REALITY"
+  grep -q 'preflight.sh' "$TMP/mo.log" \
+    && ok "в конце вызывается preflight" || bad "preflight не вызывается"
+  [[ -d "$MO" ]] && bad "dry-run создал каталог $MO" || ok "dry-run ничего не создал"
+else
+  bad "install-for-ru-mobile.sh --dry-run упал:"
+  sed 's/^/       /' "$TMP/mo.log" | tail -15
+fi
+
+head_ "10. Второй AmneziaWG-интерфейс (awg1) генерируется независимо"
+A1="$TMP/awg1"
+if AWG_IFACE=awg1 bash "$ROOT/amneziawg/install-amneziawg.sh" --dry-run --port 2408 \
+     --subnet 10.9.9 --clients 1 --out "$A1" >"$TMP/awg1.log" 2>&1; then
+  srv1="$A1/server/awg1.conf"
+  grep -q '^ListenPort = 2408$' "$srv1"   && ok "awg1: порт 2408"        || bad "awg1: неверный порт"
+  grep -q '^Address = 10.9.9.1/24$' "$srv1" && ok "awg1: своя подсеть"   || bad "awg1: неверная подсеть"
+  grep -q '^Endpoint = .*:2408$' "$A1/client1.conf" && ok "awg1: клиент смотрит на 2408" || bad "awg1: неверный Endpoint"
+else
+  bad "второй интерфейс не сгенерировался:"
+  sed 's/^/       /' "$TMP/awg1.log" | tail -10
+fi
+
+head_ "10b. preflight видит несколько туннелей одновременно"
+PF="$TMP/pf"
+mkdir -p "$PF/awg"
+cp "$A1/server/awg1.conf" "$PF/awg/" 2>/dev/null || true
+cp "$AWG_OUT/server/awg0.conf" "$PF/awg/" 2>/dev/null || true
+pf_out="$(AWG_DIR="$PF/awg" WG_DIR="$PF/none" bash "$ROOT/scripts/preflight.sh" 2>&1 || true)"
+if grep -q 'AmneziaWG: .*awg0\.conf' <<<"$pf_out" && grep -q 'AmneziaWG: .*awg1\.conf' <<<"$pf_out"; then
+  ok "preflight перечисляет awg0 и awg1"
+else
+  bad "preflight не увидел оба интерфейса:"
+  sed 's/^/       /' <<<"$pf_out" | sed -n '/AmneziaWG/p'
+fi
+if grep -q 'AmneziaWG: .*awg1\.conf (порт 2408)' <<<"$pf_out"; then
+  ok "preflight верно определил порт awg1"
+else
+  bad "preflight не определил порт awg1"
+fi
+
 head_ "Итог"
 printf '  пройдено: %s, провалено: %s\n' "$PASS" "$FAIL"
 (( FAIL == 0 )) || exit 1
